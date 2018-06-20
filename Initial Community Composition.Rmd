@@ -6,26 +6,20 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_knit$set(root.dir = "C:/Users/Timothy Brennhofer/Desktop/KBS REU/KBS Data", echo = TRUE, warning = TRUE)
-
-#set working directory
-require(knitr)
-opts_knit$set(root.dir = "C:/Users/Timothy Brennhofer/Desktop/KBS REU/KBS Data") #I'm not familiar with this approach
-setwd("C:/Users/Timothy Brennhofer/Desktop/KBS REU/KBS Data") #not sure but the spaces ('white spaces') may be messing it up. Or, you may want to add a '\' to the end of the directory. But it's fine just to refer to the file directories directly. 
-getwd()
+knitr::opts_knit$set(echo = TRUE, warning = TRUE)
 
 #load necessary packages -- "library" or "require"
 require(tidyverse) #this includes ggplot and dplyr - no need to load them separately
 require(data.table)
 
-
 #load data
 abun_raw <- fread("C:/Users/Timothy Brennhofer/Desktop/KBS REU/KBS Data/2016_10_13_run2_otus.csv")
 abun <- abun_raw
-abun[345,4719] <- 0
+abun[130,4719] <- 0
 abun <- abun %>%
   select(-Run, -Day, -Reads) %>%
   rename(Cage = `Cage#`) %>%
+  mutate(Cage = as.character(Cage)) %>%
   gather(otu, abun, -SampleID, -Cage, - Abx, -Dose, -Hour, -Cohoused, -Pair) %>%
   group_by(SampleID) %>%
   mutate(abun = abun/sum(abun), otu = as.numeric(otu)) %>%
@@ -54,29 +48,48 @@ abun_tax <- left_join(abun, tax, by = 'otu')
 ```
 
 ```{r intital composition data}
+#Construct stacked bar chart
+#Filter for reads over 0.001% at desired time points
+#compare mice recieving and not recieving a
+
+abun_tax %>%
+  filter(abun > 0.00001 & Hour %in% c(0,25,97,120)) %>%
+  ggplot(aes(x = Cage, y = abun, fill = Phylum)) +
+    geom_bar(stat = 'identity') +
+    facet_grid(Hour~Abx, scales = "free")
+
+```
+
+
+
+```{r decrease in homogeneity by taxonomical unit}
+
+
+
+```
+
+```{r final composition data}
 
 #Filter for inital reads and organize by phyla
-#why alter abun_tax permanently?
-abun_tax <- abun_tax %>%
-  filter(Hour == 0) %>%
+#why alter abun_tax permanently --> new initial abun tax as we explore initial compositions
+
+final_abun_tax <- abun_tax %>%
+  filter(Hour == 120) %>%
   group_by(mouseid, Phylum)
 
-#Create graph to demonstrate initial compositions
-tempz <- abun_tax %>%
-  group_by(mouseid, Phylum) %>%
-  filter(abun > .00001) %>%
-  mutate(percentabun = paste0(round(100 *abun, 4), "%"))
-  
-#Note that this won't do anything; ggplot will plot things alphabetically unless you format the column as a "factor" (google it)
-tempz <- tempz[order(mouseid, Phylum),]
+ggplot(final_abun_tax, aes(x = Cage, y = abun, fill = Phylum)) +
+  geom_bar(stat = "identity")+
+  facet_wrap(~Abx, scales = "free")
 
-ggplot(tempz, aes(x = mouseid, y = percentabun, fill = Phylum)) +
-  geom_bar(stat = "identity")
 
-#the problem here is that the paste0() function fills the "percentabun"column with "character" values, as opposed to "number" values. Thus, ggplot doesn't know how to plot character-based data in a quantitative way. Why not just:
+##Filtering out rare species... is this worth it to clean up the figure?
 
-ggplot(abun_tax, aes(x = mouseid, y = abun, fill = Phylum)) +
-  geom_bar(stat = "identity")
+#tempz2 <- final_abun_tax %>%
+  #group_by(mouseid, Phylum) %>%
+  #filter(abun > .00001)
+
+#ggplot(tempz2, aes(x = mouseid, y = abun, fill = Phylum)) +
+  #geom_bar(stat = "identity")
 
 ```
 
