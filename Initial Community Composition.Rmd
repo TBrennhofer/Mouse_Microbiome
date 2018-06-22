@@ -9,21 +9,35 @@ output: html_document
 knitr::opts_knit$set(echo = TRUE, warning = TRUE)
 
 #load necessary packages -- "library" or "require"
-require(tidyverse) #this includes ggplot and dplyr - no need to load them separately
+require(tidyverse)
 require(data.table)
+require(vegan)
 
 #load data
 abun_raw <- fread("C:/Users/Timothy Brennhofer/Desktop/KBS REU/KBS Data/2016_10_13_run2_otus.csv")
-abun <- abun_raw
+abun <- as.data.frame(abun_raw)
 abun[130,4719] <- 0
+
+filt <- rowSums(abun[, c(11:ncol(abun))]) >= 5000
+abun <- abun[filt, ]
+
+#rarefy
+tmp <- rrarefy(abun[, c(11:ncol(abun))], 5000)
+abun <- cbind(abun[, c(1:10)], tmp)
+abun_bc_raw <- abun
+# !!! Stop here to run BC Dissimilarity 
+
+#check
+all(rowSums(abun[, c(11:ncol(abun))]) == 5000)
+
 abun <- abun %>%
-  select(-Run, -Day, -Reads) %>%
-  rename(Cage = `Cage#`) %>%
-  mutate(Cage = as.character(Cage)) %>%
-  gather(otu, abun, -SampleID, -Cage, - Abx, -Dose, -Hour, -Cohoused, -Pair) %>%
-  group_by(SampleID) %>%
+  select(-Run, -Day, -Reads, -`Cage#`, -Dose, -Cohoused, -Pair) %>%
+  rename(Mouse = SampleID) %>%
+  mutate(Mouse = as.factor(floor(Mouse))) %>%
+  gather(otu, abun, - Abx, -Hour, -Mouse) %>%
+  group_by(Mouse) %>%
   mutate(abun = abun/sum(abun), otu = as.numeric(otu)) %>%
-  mutate(mouseid = paste(Cage, Abx, sep = "_")) %>%
+  mutate(mouseid = paste(Mouse, Abx, Hour, sep = "_")) %>%
   ungroup()
 
 ```
@@ -51,10 +65,10 @@ abun_tax <- left_join(abun, tax, by = 'otu')
 #Construct stacked bar chart
 #Filter for reads over 0.001% at desired time points
 #compare mice recieving and not recieving a
-
-abun_tax %>%
+initial_abun_tax <- abun_tax
+initial_abun_tax %>%
   filter(abun > 0.00001 & Hour %in% c(0,25,97,120)) %>%
-  ggplot(aes(x = Cage, y = abun, fill = Phylum)) +
+  ggplot(aes(x = Mouse, y = abun, fill = Phylum)) +
     geom_bar(stat = 'identity') +
     facet_grid(Hour~Abx, scales = "free")
 
@@ -64,32 +78,71 @@ abun_tax %>%
 
 ```{r decrease in homogeneity by taxonomical unit}
 
+#Unsuccessful for the OTU-Level analysis based on the rise in present proportion form Species to OTU
+
+j <- tax %>%
+  ungroup() %>%
+  transmute(
+    Phylum = as.numeric(as.factor(Phylum)),
+    Class = paste0(Phylum, as.numeric(as.factor(Class))),
+    Order = paste0(Phylum, Class, as.numeric(as.factor(Order))),
+    Family = paste0(Phylum, Class, Order, as.numeric(as.factor(Order))),
+    Genus = paste0(Phylum, Class, Order, Family, as.numeric(as.factor(Genus))),
+    Species = paste0(Phylum, Class, Order, Family, Genus, as.numeric(as.factor(Species))),
+    OTU = paste0(Phylum, Class, Order, Family, Genus, Species, otu),
+    otu = otu
+    ) %>%
+  gather(tax_level, name, -otu) %>% 
+  full_join(abun, by = 'otu') %>%
+  filter(abun > 0 & Hour < 121) 
+
+j <- j %>% 
+  mutate(tax_level = factor(tax_level, levels =  c('Phylum','Class','Order','Family','Genus','Species', 'OTU'))) %>%
+  group_by(tax_level) %>% 
+  mutate(total_rich = n_distinct(name)) %>% 
+  group_by(tax_level, Mouse, Hour, Abx) %>% 
+  summarise(rich = n_distinct(name), total_rich = unique(total_rich), val = (-((rich/total_rich)*log(rich / total_rich))))
+          
+#val = (rich/total_rich))
+
+j %>% 
+  ungroup() %>%
+  ggplot(aes(x = tax_level, y = (rich/total_rich), group = Mouse, color = Abx)) + 
+  geom_smooth(se = FALSE) + 
+  expand_limits(y = c(0,1))
+
+j %>%
+  ungroup() %>%
+  filter(tax_level == "OTU") %>%
+  ggplot(aes(x = Hour, y = val, group = Mouse, color = Abx ))+
+  geom_smooth(se=FALSE)
+  #expand_limits(y = c(0.25,0.5))
+```
+
+
+
+```{r dissimilarity analysis}
+abun_bc <- abun_bc_raw %>%
+  select(-Run, -Day, -Reads, -`Cage#`, -Dose, -Cohoused, -Pair) %>%
+  rename(Mouse = SampleID) %>%
+  mutate(Mouse = as.factor(floor(Mouse))) %>%
+  mutate(mouseid = paste(Mouse, Abx, Hour, sep = "_")) %>%
+  select(mouseid, everything()) %>%
+  column_to_rownames(var = "mouseid")
+dissim_abun_BC <- vegdist(abun_bc[c(4:ncol(abun_bc))], method = "bray")
+BC_matrix <- as.matrix(dissim_abun_BC)
+#dissim_abun_BC_df <- as.data.frame(as.matrix(dissim_abun_BC)) <--- Is this needed? i dont think so
+melted_bc_matrix <- melt(BC_matrix) %>%
+  rename(BC = value)
+melted_bc_matrix <- separate(melted_bc_matrix, Var1, sep = "_", c("Mouse1", "Abx1", "Hour1"))
+
+melted_bc_matrix <- separate(melted_bc_matrix, Var2, sep = "_", c("Mouse2", "Abx2", "Hour2"))
+
+melted_bc_matrix %>%
+  ggplot(x = , y = BC, group = Abx)
+
+ ggplot(aes(x = tax_level, y = (rich/total_rich), group = Mouse, color = Abx)) + 
+  geom_smooth(se = FALSE)
 
 
 ```
-
-```{r final composition data}
-
-#Filter for inital reads and organize by phyla
-#why alter abun_tax permanently --> new initial abun tax as we explore initial compositions
-
-final_abun_tax <- abun_tax %>%
-  filter(Hour == 120) %>%
-  group_by(mouseid, Phylum)
-
-ggplot(final_abun_tax, aes(x = Cage, y = abun, fill = Phylum)) +
-  geom_bar(stat = "identity")+
-  facet_wrap(~Abx, scales = "free")
-
-
-##Filtering out rare species... is this worth it to clean up the figure?
-
-#tempz2 <- final_abun_tax %>%
-  #group_by(mouseid, Phylum) %>%
-  #filter(abun > .00001)
-
-#ggplot(tempz2, aes(x = mouseid, y = abun, fill = Phylum)) +
-  #geom_bar(stat = "identity")
-
-```
-
