@@ -2,12 +2,25 @@
 title: "Initial Biome Composition Analysis"
 author: "Timothy Brennhofer"
 date: "June 12, 2018"
-output: html_document
+output: 
+  html_document:
+    code_folding: hide
 ---
+#Differential Effects of Antibiotic Disturbance on Mouse Gut Microbiomes
+***
+### Initial Abundance Data Setup and Manipulation
+***
+##### We began by loading the mouse gut microbe abundance data provided by Aspen Reese and proceed to do the following:
 
-```{r setup, include=FALSE}
-knitr::opts_knit$set(echo = TRUE, warning = TRUE)
+1. Correct cell *130x4719* to show there was no recorded abundance
+2. Filter out all samples where the total abundance was less than 5,000
+3. Rarefy the data to account for differing sample sizes
+4. Eliminated unnecessary metadata for ananalysis of initial community composition
+5. Convert bacterial abundance to relative bacterial abundance within each host mouse
+6. Define a new metadata variable for the samples titled __mouseid__ composed of the mouse's id number, whether or not it recieved the antibiotic treatment, and at which measurement hour it was taken
 
+
+```{r setup, include = TRUE}
 #load necessary packages -- "library" or "require"
 require(tidyverse)
 require(data.table)
@@ -42,6 +55,10 @@ abun <- abun %>%
 
 ```
 
+### Adherence of Taxanomic Metadata to Abuandance Data
+***
+
+Here I take the taxonomical metadata previously compiled by John Guittar and join it with the previously organized abundance data via OTU identification numbers.
 
 ```{r adding taxonomy}
 
@@ -53,6 +70,8 @@ tax <- tax %>%
   rename(otu = `#OTU ID`, tax = taxonomy) %>%
   mutate(tax = gsub("\\s|.__|\\[|\\]|Other", "", tax)) %>%
   separate(tax, sep = ';', c("Domain", "Phylum", "Class", "Order", "Family", "Genus", "Species"), fill = 'right')
+
+#Convert unidentified taxonomical levels to "unclassified"
 tax <- as.data.frame(apply(tax, 2, function(x) ifelse(x == '', 'unclassified', x)), stringsAsFactors = FALSE)
 tax$otu <- as.numeric(tax$otu)
 
@@ -61,10 +80,24 @@ abun_tax <- left_join(abun, tax, by = 'otu')
 
 ```
 
+### Visualizing Community Compositions over the 120 Hr. Antibiotic Treatment Period
+***
+
+Using the abundance and taxonomic data, we can determine what bacteria compose the community and how that changes over the course of treatment.
+
+##### This barchart does the following:
+1. Divides the community at the phylum level
+2. Includes only those phyla corresponding to at least 0.001% of the community
+3.Segements the metacommunity by:
+  + Individual mouse
+  + Measurement hour (0, 25, 97, 120)
+  + Presence of antibiotic treatment
+
+
 ```{r intital composition data}
 #Construct stacked bar chart
 #Filter for reads over 0.001% at desired time points
-#compare mice recieving and not recieving a
+#compare mice recieving and not recieving antibiotics
 initial_abun_tax <- abun_tax
 initial_abun_tax %>%
   filter(abun > 0.00001 & Hour %in% c(0,25,97,120)) %>%
@@ -74,12 +107,17 @@ initial_abun_tax %>%
 
 ```
 
+### Homogeneity across Communities Decreases with Increasing Taxonomical Resolution
+***
 
+This required the manipulation of the taxonomic data, and that it be joined to the abundance data after these changes. Each taxonomic identifaction level needed to include all higher levels of identification in order to guaruntee "_unkown_" samples would be accounted for individually. 
+
+##### __Remember:__ OTU-Level Issues
 
 ```{r decrease in homogeneity by taxonomical unit}
 
-#Unsuccessful for the OTU-Level analysis based on the rise in present proportion form Species to OTU
-
+#Combine taxonomic level IDs so each ID is unique
+#Join to the abundance data once again
 j <- tax %>%
   ungroup() %>%
   transmute(
@@ -96,32 +134,44 @@ j <- tax %>%
   full_join(abun, by = 'otu') %>%
   filter(abun > 0 & Hour < 121) 
 
+# Determine the total richness of all the communities and the richness of each host for each taxonomic level
+
 j <- j %>% 
   mutate(tax_level = factor(tax_level, levels =  c('Phylum','Class','Order','Family','Genus','Species', 'OTU'))) %>%
   group_by(tax_level) %>% 
   mutate(total_rich = n_distinct(name)) %>% 
   group_by(tax_level, Mouse, Hour, Abx) %>% 
-  summarise(rich = n_distinct(name), total_rich = unique(total_rich), val = (-((rich/total_rich)*log(rich / total_rich))))
-          
-#val = (rich/total_rich))
+  summarise(rich = n_distinct(name), total_rich = unique(total_rich), H = (-((rich/total_rich)*log(rich / total_rich))))
 
+#Here, (H)= Shannon Diversity Index          
+#Alternatively, H = (rich/total_rich)) can be used to determine the simple proportion of present units among the total possible across the mice
+
+#Graph using the simple presence proportion
 j %>% 
   ungroup() %>%
   ggplot(aes(x = tax_level, y = (rich/total_rich), group = Mouse, color = Abx)) + 
   geom_smooth(se = FALSE) + 
   expand_limits(y = c(0,1))
 
+#Graph how Shannon Diversity Index flucuates over the treatment period
 j %>%
   ungroup() %>%
   filter(tax_level == "OTU") %>%
-  ggplot(aes(x = Hour, y = val, group = Mouse, color = Abx ))+
-  geom_smooth(se=FALSE)
-  #expand_limits(y = c(0.25,0.5))
+  ggplot(aes(x = Hour, y = H, group = Mouse, color = Abx )) +
+  geom_smooth(se=FALSE) +
+  expand_limits(y = c(0,0.5))
 ```
 
+### BC Dissimilarity Changes over Time
+***
 
+Mice were re-labeled to include all relevant metadata.
+Bray-Curtis Dissimilarity was calculated among all mice.
+Need to filter repeated data and graph across time.
 
 ```{r dissimilarity analysis}
+
+#Create mouseid variable to consolidate metadata as the row names
 abun_bc <- abun_bc_raw %>%
   select(-Run, -Day, -Reads, -`Cage#`, -Dose, -Cohoused, -Pair) %>%
   rename(Mouse = SampleID) %>%
@@ -129,20 +179,24 @@ abun_bc <- abun_bc_raw %>%
   mutate(mouseid = paste(Mouse, Abx, Hour, sep = "_")) %>%
   select(mouseid, everything()) %>%
   column_to_rownames(var = "mouseid")
+
+#Build Bray-Curtis Matrix
 dissim_abun_BC <- vegdist(abun_bc[c(4:ncol(abun_bc))], method = "bray")
 BC_matrix <- as.matrix(dissim_abun_BC)
-#dissim_abun_BC_df <- as.data.frame(as.matrix(dissim_abun_BC)) <--- Is this needed? i dont think so
 melted_bc_matrix <- melt(BC_matrix) %>%
   rename(BC = value)
+#Separate meta-data into individual columns
 melted_bc_matrix <- separate(melted_bc_matrix, Var1, sep = "_", c("Mouse1", "Abx1", "Hour1"))
-
 melted_bc_matrix <- separate(melted_bc_matrix, Var2, sep = "_", c("Mouse2", "Abx2", "Hour2"))
 
-melted_bc_matrix %>%
-  ggplot(x = , y = BC, group = Abx)
+#Need to figure out how to filter, then what needs to be in the graph on X
+#Possibly need to stack the "repeat" variables using gather?
 
- ggplot(aes(x = tax_level, y = (rich/total_rich), group = Mouse, color = Abx)) + 
-  geom_smooth(se = FALSE)
+#melted_bc_matrix %>%
+ # ggplot(x = , y = BC, group = Abx)
+
+#ggplot(aes(x = tax_level, y = (rich/total_rich), group = Mouse, color = Abx)) + 
+#  geom_smooth(se = FALSE)
 
 
 ```
