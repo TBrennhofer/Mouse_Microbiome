@@ -29,8 +29,23 @@ require(vegan)
 #load data
 abun_raw <- fread("C:/Users/Timothy Brennhofer/Desktop/KBS REU/KBS Data/2016_10_13_run2_otus.csv")
 abun <- as.data.frame(abun_raw)
-abun[130,4719] <- 0
 
+#fix data entry problems
+abun[130,4719] <- 0
+abun$Cohoused[abun$Mouse == 3 & abun$Hour == 168] <- 'N'
+abun$Cohoused[abun$Mouse == 6 & abun$Hour == 168] <- 'N'
+abun$Cohoused[abun$Mouse == 7 & abun$Hour == 168] <- 'Y'
+abun$Pair[abun$Mouse == 7 & abun$Hour == 168] <- 4
+abun$Abx[abun$Mouse == 7 & abun$Hour == 168] <- 'Y'
+abun$Dose[abun$Mouse == 7 & abun$Hour == 168] <- 'Recovery'
+abun$Cohoused[abun$Mouse == 9 & abun$Hour == 168] <- 'Y'
+abun$Pair[abun$Mouse == 9 & abun$Hour == 168] <- 2
+abun$Abx[abun$Mouse == 9 & abun$Hour == 168] <- 'N'
+abun$Dose[abun$Mouse == 9 & abun$Hour == 168] <- 'No'
+abun$Cohoused[abun$Mouse == 12 & abun$Hour == 168] <- 'N'
+abun$Cohoused[abun$Mouse == 16 & abun$Hour == 168] <- 'N'
+
+#filter for only abundances over 5000 reads
 filt <- rowSums(abun[, c(11:ncol(abun))]) >= 5000
 abun <- abun[filt, ]
 
@@ -43,14 +58,15 @@ abun_bc_raw <- abun
 #check
 all(rowSums(abun[, c(11:ncol(abun))]) == 5000)
 
+#Select relevant metadata, create unique ID code for each mouse and measurement, make abundance relative
 abun <- abun %>%
   select(-Run, -Day, -Reads, -`Cage#`, -Dose, -Cohoused, -Pair) %>%
   rename(Mouse = SampleID) %>%
   mutate(Mouse = as.factor(floor(Mouse))) %>%
   gather(otu, abun, - Abx, -Hour, -Mouse) %>%
   group_by(Mouse) %>%
-  mutate(abun = abun/sum(abun), otu = as.numeric(otu)) %>%
   mutate(mouseid = paste(Mouse, Abx, Hour, sep = "_")) %>%
+  mutate(abun = abun/sum(abun), otu = as.numeric(otu)) %>%
   ungroup()
 
 ```
@@ -132,7 +148,7 @@ j <- tax %>%
     ) %>%
   gather(tax_level, name, -otu) %>% 
   full_join(abun, by = 'otu') %>%
-  filter(abun > 0 & Hour < 121) 
+  filter(abun > 0 & Hour <= 120) 
 
 # Determine the total richness of all the communities and the richness of each host for each taxonomic level
 
@@ -150,6 +166,7 @@ j <- j %>%
 j %>% 
   ungroup() %>%
   ggplot(aes(x = tax_level, y = (rich/total_rich), group = Mouse, color = Abx)) + 
+  scale_color_manual(values = c("black", "red")) +
   geom_smooth(se = FALSE) + 
   expand_limits(y = c(0,1))
 
@@ -158,6 +175,7 @@ j %>%
   ungroup() %>%
   filter(tax_level == "OTU") %>%
   ggplot(aes(x = Hour, y = H, group = Mouse, color = Abx )) +
+  scale_color_manual(values = c("black", "red")) +
   geom_smooth(se=FALSE) +
   expand_limits(y = c(0,0.5))
 ```
@@ -166,8 +184,8 @@ j %>%
 ***
 
 Mice were re-labeled to include all relevant metadata.
-Bray-Curtis Dissimilarity was calculated among all mice.
-Need to filter repeated data and graph across time.
+Bray-Curtis Dissimilarity was calculated among all mice and within both the antibiotic treatments and treatment time points.
+
 
 ```{r dissimilarity analysis}
 
@@ -186,26 +204,75 @@ BC_matrix <- as.matrix(dissim_abun_BC)
 BC_matrix[upper.tri(BC_matrix, diag = TRUE)] <- NA
 melted_bc_matrix <- melt(BC_matrix) %>%
   rename(BC = value)
+
 #Separate meta-data into individual columns
 melted_bc_matrix <- separate(melted_bc_matrix, Var1, sep = "_", c("Mouse1", "Abx1", "Hour1"))
 melted_bc_matrix <- separate(melted_bc_matrix, Var2, sep = "_", c("Mouse2", "Abx2", "Hour2"))
+
+#Filter for similar antibiotic treatments and similar time points during treatment only
 melted_bc_matrix <- melted_bc_matrix %>%
-  filter(Abx1 == Abx2 & Hour1 == Hour2 & !is.na(BC) & Hour1 <= 120) %>%
+  filter(Abx1 == Abx2 & Hour1 == Hour2 & !is.na(BC)) %>%
   ungroup() %>%
   mutate(Hour1 = as.numeric(Hour1), Hour2 = as.numeric(Hour2)) %>%
-  group_by(Abx1, Hour1)
+  subset(select = -c(Mouse2, Hour2, Abx2)) %>%
+  rename(Mouse = Mouse1, Abx = Abx1, Hour = Hour1) %>%
+  filter(Hour <= 120) %>%
+  group_by( Abx, Hour)
 
-  
-ggplot(melted_bc_matrix, aes(x = Hour1, y = BC, group = Abx1, color = Abx1 )) +
+#Graph results  
+ggplot(melted_bc_matrix, aes(x = Hour, y = BC, group = Abx, color = Abx)) +
+  scale_color_manual(values = c("black", "red")) +
   geom_point() +
   geom_smooth()
-#Need to figure out how to filter, then what needs to be in the graph on X
-#Possibly need to stack the "repeat" variables using gather?
 
-#melted_bc_matrix %>%
- # ggplot(x = , y = BC, group = Abx)
+```
 
-#ggplot(aes(x = tax_level, y = (rich/total_rich), group = Mouse, color = Abx)) + 
-#  geom_smooth(se = FALSE)
+### Relative Performance 
+***
+
+Type info here
+
+
+``` {r Relative Performance Analysis}
+#filter instances only 0, fewer than 5 data points
+rp_abun_tax_raw <- abun_tax %>%
+  mutate(Entero_Sort = if_else(Family == "Enterobacteriaceae", "Y", "N")) %>%
+  group_by(Abx, Mouse, Entero_Sort, otu) %>%
+  filter(Hour <= 120 & sum(abun > 0) > 5) %>%
+  do(mod = summary(lm(abun ~ Hour, .))) %>%
+  mutate(
+    pval = mod$coefficients[[8]],
+    tval = mod$coefficients[[6]]) %>%
+  filter(pval <= 0.05) %>%
+  ungroup() %>%
+  group_by(Abx, otu, Entero_Sort) %>%
+  mutate(
+    pos_tval = sum(tval > 0), 
+    neg_tval = sum(tval < 0)) %>%
+  filter(pos_tval + neg_tval > 1)
+
+rp_abun_tax <- rp_abun_tax_raw %>%
+  group_by(Abx, otu, Entero_Sort) %>%
+  summarise(
+    pos_tval = sum(tval > 0), 
+    neg_tval = sum(tval < 0)) %>%
+  filter(pos_tval + neg_tval > 1)
+  
+
+ggplot(rp_abun_tax, aes(x = pos_tval, y = neg_tval, color = Abx, shape = Entero_Sort)) +
+  geom_jitter(width = .25, height = .25) +
+  scale_color_manual(values = c("black", "red")) +
+  scale_shape_manual(values = c(16, 8)) +
+  geom_abline (intercept = 0, slope = 1, linetype = 2, color = "blue") +
+  expand_limits(x = c(0,7.5), y = c(0,7.5))
+  
+#rp_abun_tax_filt <- rp_abun_tax_raw %>%
+#IDing individual otus and models of interest
+#Cluster 1 on Y-Axis
+#filter(pos_tval == 0 & Abx == "N")
+#Cluster 2 on X-Axis
+#filter(neg_tval == 0 & Abx == "Y" & Entero_Sort == "N")
+#Cluster 3 on Y-Axis
+#filter(pos_tval == 0 & Abx == "N" & otu != 273657)
 
 ```
