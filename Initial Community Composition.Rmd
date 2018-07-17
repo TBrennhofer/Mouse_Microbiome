@@ -27,7 +27,7 @@ require(data.table)
 require(vegan)
 
 #load data
-abun_raw <- fread("C:/Users/Timothy Brennhofer/Desktop/KBS REU/KBS Data/2016_10_13_run2_otus.csv")
+abun_raw <- fread("C:/Users/Timothy Brennhofer/Desktop/KBS REU/Shared Google Drive/Mouse_Microbiome_Shared_Files/Data/2018_06_12_run2_otus.csv")
 abun <- as.data.frame(abun_raw)
 
 #fix data entry problems
@@ -64,7 +64,7 @@ abun <- abun %>%
   rename(Mouse = SampleID) %>%
   mutate(Mouse = as.factor(floor(Mouse))) %>%
   gather(otu, abun, - Abx, -Hour, -Mouse) %>%
-  group_by(Mouse) %>%
+  group_by(Mouse, Hour) %>%
   mutate(mouseid = paste(Mouse, Abx, Hour, sep = "_")) %>%
   mutate(abun = abun/sum(abun), otu = as.numeric(otu)) %>%
   ungroup()
@@ -96,6 +96,38 @@ abun_tax <- left_join(abun, tax, by = 'otu')
 
 ```
 
+### Adherence of Trait Metadata to Abuandance and Taxonomic Data
+***
+
+Here I take the trait metadata previously compiled by John Guittar through an online database query and join it with the previously organized abundance and trait data via OTU identification numbers.
+
+```{r adding traits}
+
+traits <- readRDS("C:/Users/Timothy Brennhofer/Desktop/KBS REU/Shared Google Drive/Mouse_Microbiome_Shared_Files/Data/traits_castor_subtree_averaging.RDS") %>%
+  mutate(otu = as.integer(gsub('otu', '', otu)))
+
+#filter so trait and tax tables have the same taxa.
+#create wide version
+traits <- filter(traits, otu %in% abun_tax$otu)
+traits <- spread(traits, trait, val, fill = NA)
+abun_tax_trait <- left_join(abun_tax, traits, by = 'otu')
+
+#set trait names for plotting
+#renaming
+trait_names <- c(
+  "B_vitamins" = "B vitamins",
+  "Copies_16S" = "16S gene copies",
+  "Forms_biofilms" = "Forms biofilms",
+  "GC_content" = "GC content",
+  "Gene_number" = "Genes",
+  "Gram_positive" = "Gram-positive",
+  "IgA" = "IgA binding affinity",
+  "Obligate_anaerobe" = "Obligate anaerobe",
+  "Temp_optimum" = "Temperature optimum")
+
+```
+
+
 ### Visualizing Community Compositions over the 120 Hr. Antibiotic Treatment Period
 ***
 
@@ -112,14 +144,28 @@ Using the abundance and taxonomic data, we can determine what bacteria compose t
 
 ```{r intital composition data}
 #Construct stacked bar chart
-#Filter for reads over 0.001% at desired time points
+#Filter for reads over 0.0001% at desired time points
 #compare mice recieving and not recieving antibiotics
 initial_abun_tax <- abun_tax
-initial_abun_tax %>%
-  filter(abun > 0.00001 & Hour %in% c(0,25,97,120)) %>%
+labels1 <- c(N = "No Antibiotics", Y = "Antibiotics")
+labels2 <- c('0' = "0 Hours", '25' = "25 Hours", '97' = "97 Hours", '120' = "120 Hours")
+as.data.frame(initial_abun_tax) %>%
+  filter(abun > 0.000001 & Hour %in% c(0,25,97,120)) %>%
   ggplot(aes(x = Mouse, y = abun, fill = Phylum)) +
-    geom_bar(stat = 'identity') +
-    facet_grid(Hour~Abx, scales = "free")
+    geom_bar(stat = 'identity', position = 'stack') +
+    scale_fill_brewer(palette="Paired") +
+    theme_bw() +
+    ylab("OTU Relative Abundance") +
+    theme(
+      strip.background = element_rect(colour = "black", fill = "white"),
+      strip.text = element_text(size = 16, face = "bold"),
+      legend.key = element_rect(fill = "white", colour = "black"),
+      axis.text=element_text(size=18, face = "bold"),
+      axis.title=element_text(size=20, face = "bold"),
+      legend.title = element_text(face = "bold", size = 16),
+      legend.text = element_text(size = 14)) +
+    facet_grid(Hour~Abx, labeller=labeller(Abx = labels1, Hour = labels2), scales = "free")
+
 
 ```
 
@@ -166,18 +212,48 @@ j <- j %>%
 j %>% 
   ungroup() %>%
   ggplot(aes(x = tax_level, y = (rich/total_rich), group = Mouse, color = Abx)) + 
-  scale_color_manual(values = c("black", "red")) +
+  scale_color_manual(
+    values = c("black", "red"),
+    name="Antibiotic\nTreated",
+    breaks=c("N", "Y"),
+    labels=c("No", "Yes")) +
   geom_smooth(se = FALSE) + 
-  expand_limits(y = c(0,1))
+  theme_light() +
+  theme(
+      legend.key = element_rect(fill = "white", colour = "black"),
+      legend.position = c(.9, .9),
+      legend.justification = c("right", "top"),
+      legend.box.just = "right",
+      axis.text=element_text(size=18, face = "bold"),
+      axis.title=element_text(size=20, face = "bold"),
+      legend.title = element_text(face = "bold", size = 16),
+      legend.text = element_text(size = 14)) +
+  labs(y = "Relative Taxonomic Richness", x = "Taxonomic Level") +
+  expand_limits(y = c(0,.6))
 
 #Graph how Shannon Diversity Index flucuates over the treatment period
 j %>%
   ungroup() %>%
   filter(tax_level == "OTU") %>%
   ggplot(aes(x = Hour, y = H, group = Mouse, color = Abx )) +
-  scale_color_manual(values = c("black", "red")) +
+  scale_color_manual(
+    values = c("black", "red"),
+    name="Antibiotic\nTreated",
+    breaks=c("N", "Y"),
+    labels=c("No", "Yes")) +
+  theme_light() +
+  labs(y = "Shannon Diversity Index") +
   geom_smooth(se=FALSE) +
-  expand_limits(y = c(0,0.5))
+  expand_limits(y = c(0,0.5), x = c(0,125)) +
+  theme(
+      legend.key = element_rect(fill = "white", colour = "black"),
+      legend.position = c(.9, .9),
+      legend.justification = c("right", "top"),
+      legend.box.just = "right",
+      axis.text=element_text(size=16, face = "bold"),
+      axis.title=element_text(size=20, face = "bold"),
+      legend.title = element_text(face = "bold", size = 16),
+      legend.text = element_text(size = 14))
 ```
 
 ### BC Dissimilarity Changes over Time
@@ -221,8 +297,21 @@ melted_bc_matrix <- melted_bc_matrix %>%
 
 #Graph results  
 ggplot(melted_bc_matrix, aes(x = Hour, y = BC, group = Abx, color = Abx)) +
-  scale_color_manual(values = c("black", "red")) +
+  scale_color_manual(
+    values = c("black", "red"),
+    name="Antibiotic\nTreated",
+    breaks=c("N", "Y"),
+    labels=c("No", "Yes")) +
   geom_point() +
+  theme_light() +
+  labs(y = "Bray-Curtis Dissimilarity") +
+  theme(
+    legend.key = element_rect(fill = "white", colour = "black"),
+      legend.box.just = "right",
+      axis.text=element_text(size=16, face = "bold"),
+      axis.title=element_text(size=20, face = "bold"),
+      legend.title = element_text(face = "bold", size = 16),
+      legend.text = element_text(size = 14)) +
   geom_smooth()
 
 ```
@@ -235,7 +324,7 @@ Type info here
 
 ``` {r Relative Performance Analysis}
 #filter instances only 0, fewer than 5 data points
-rp_abun_tax_raw <- abun_tax %>%
+rp_abun_tax_trait_raw <- abun_tax_trait %>%
   mutate(Entero_Sort = if_else(Family == "Enterobacteriaceae", "Y", "N")) %>%
   group_by(Abx, Mouse, Entero_Sort, otu) %>%
   filter(Hour <= 120 & sum(abun > 0) > 5) %>%
@@ -244,14 +333,9 @@ rp_abun_tax_raw <- abun_tax %>%
     pval = mod$coefficients[[8]],
     tval = mod$coefficients[[6]]) %>%
   filter(pval <= 0.05) %>%
-  ungroup() %>%
-  group_by(Abx, otu, Entero_Sort) %>%
-  mutate(
-    pos_tval = sum(tval > 0), 
-    neg_tval = sum(tval < 0)) %>%
-  filter(pos_tval + neg_tval > 1)
+  ungroup()
 
-rp_abun_tax <- rp_abun_tax_raw %>%
+rp_abun_tax_trait <- rp_abun_tax_trait_raw %>%
   group_by(Abx, otu, Entero_Sort) %>%
   summarise(
     pos_tval = sum(tval > 0), 
@@ -259,14 +343,34 @@ rp_abun_tax <- rp_abun_tax_raw %>%
   filter(pos_tval + neg_tval > 1)
   
 
-ggplot(rp_abun_tax, aes(x = pos_tval, y = neg_tval, color = Abx, shape = Entero_Sort)) +
+p <- ggplot(rp_abun_tax_trait, aes(x = pos_tval, y = neg_tval, color = Abx, shape = Entero_Sort)) +
   geom_jitter(width = .25, height = .25) +
-  scale_color_manual(values = c("black", "red")) +
-  scale_shape_manual(values = c(16, 8)) +
+  scale_color_manual(
+    values = c("black", "red"),
+    name="Antibiotic\nTreated",
+    breaks=c("N", "Y"),
+    labels=c("No", "Yes")) +
+  scale_shape_manual(values = c(16, 8),
+    name="OTU Family",
+    breaks=c("N", "Y"),
+    labels=c("Other Family", "Enterobact.")) +
+  theme_light() +
   geom_abline (intercept = 0, slope = 1, linetype = 2, color = "blue") +
+  labs(x = "# Mice where OTU Abundance Increases", y = "# Mice where OTU Abundance Decreases") +
+  theme(
+    axis.text=element_text(size=12),
+    axis.title=element_text(size=14),
+    legend.position = c(1, .75),
+    legend.justification = c("right", "top"),
+    legend.box.just = "center",
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.box.background = element_rect(),
+    legend.box.margin = margin(3, 3, 3, 3)) +
   expand_limits(x = c(0,7.5), y = c(0,7.5))
   
-#rp_abun_tax_filt <- rp_abun_tax_raw %>%
+rp_abun_tax_trait_filt <- rp_abun_tax_trait_raw %>%
+  filter(pos_tval == 2 & neg_tval == 1)
 #IDing individual otus and models of interest
 #Cluster 1 on Y-Axis
 #filter(pos_tval == 0 & Abx == "N")
@@ -274,5 +378,164 @@ ggplot(rp_abun_tax, aes(x = pos_tval, y = neg_tval, color = Abx, shape = Entero_
 #filter(neg_tval == 0 & Abx == "Y" & Entero_Sort == "N")
 #Cluster 3 on Y-Axis
 #filter(pos_tval == 0 & Abx == "N" & otu != 273657)
+
+```
+
+``` {r Unpacking Relative Performance Analysis (above)}
+
+unpack_abun_tax <- abun_tax %>%
+  filter(Mouse %in% c(4,6,13) & otu == 259494 & Hour <= 120)
+BB <- ggplot(unpack_abun_tax, aes(x = Hour, y = abun, group = Mouse, color = Mouse)) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  theme_light() +
+  scale_color_brewer(palette="Dark2") +
+  ylab("OTU Relative Abundance") +
+  expand_limits(x = c(0,125)) +
+  theme(
+    legend.position = c(.25, .9),
+    legend.justification = c("right", "top"),
+    legend.box.just = "right",
+    legend.key = element_rect(fill = "white", colour = "black"),
+    legend.title = element_text(face = "bold", size = 20),
+    legend.text = element_text(size = 18),
+    axis.text=element_text(size=20, face = "bold"),
+    axis.title=element_text(size=22, face = "bold"))
+
+unpack_abun_tax <- abun_tax %>%
+  filter(Mouse %in% c(14,16,18) & otu == 260666 & Hour <= 120)
+DD <- ggplot(unpack_abun_tax, aes(x = Hour, y = abun, group = Mouse, color = Mouse)) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  theme_light() +
+  scale_color_brewer(palette="Dark2") +
+  ylab("OTU Relative Abundance") +
+  expand_limits(x = c(0,125)) +
+  theme(
+    legend.position = c(.25, .9),
+    legend.justification = c("right", "top"),
+    legend.box.just = "right",
+    legend.key = element_rect(fill = "white", colour = "black"),
+    legend.title = element_text(face = "bold", size = 18),
+    legend.text = element_text(size = 16),
+    axis.text=element_text(size=18, face = "bold"),
+    axis.title=element_text(size=20, face = "bold"))
+
+unpack_abun_tax <- abun_tax %>%
+  filter(otu == 259494 & Hour <= 120)
+CC <- ggplot(unpack_abun_tax, aes(x = Hour, y = abun, group = Mouse, color = Abx)) +
+  geom_point() +
+  geom_smooth(se = FALSE) +
+  facet_grid(~Abx, labeller=labeller(Abx = labels1, Hour = labels2), scales = "free") +
+  theme(
+      strip.background = element_rect(colour = "black", fill = "white"),
+      strip.text = element_text(size = 16, face = "bold"),
+      #legend.key = element_rect(fill = "white", colour = "black"),
+      #legend.position = c(.9, .9),
+      #legend.justification = c("right", "top"),
+      #legend.box.just = "right",
+      axis.text=element_text(size=18, face = "bold"),
+      axis.title=element_text(size=20, face = "bold"),
+      legend.title = element_text(face = "bold", size = 16),
+      legend.text = element_text(size = 14))
+
+```
+
+``` {r Relative Performance Analysis with Traits}
+
+#Substitute trait of interest in all locations below 
+
+rp_abun_tax_trait_raw_2 <- abun_tax_trait %>%
+  mutate(Entero_Sort = if_else(Family == "Enterobacteriaceae", "Y", "N")) %>%
+  group_by(Abx, Mouse, Length, otu) %>%
+  filter(Hour <= 120 & sum(abun > 0) > 5) %>%
+  do(mod = summary(lm(abun ~ Hour, .))) %>%
+  mutate(
+    pval = mod$coefficients[[8]],
+    tval = mod$coefficients[[6]]) %>%
+  filter(pval <= 0.1) %>%
+  ungroup() %>%
+  group_by(Abx, otu, Length)
+
+rp_abun_tax_trait_2 <- rp_abun_tax_trait_raw_2 %>%
+  group_by(Abx, Length, otu) %>%
+  summarise(
+    pos_tval = sum(tval > 0), 
+    neg_tval = sum(tval < 0)) %>%
+  filter(pos_tval + neg_tval > 1)
+
+mid<-mean(abun_tax_trait$Length)
+
+ggplot(rp_abun_tax_trait_2, aes(x = pos_tval, y = neg_tval, color = Length, shape = Abx)) +
+  geom_jitter(width = .25, height = .25) +
+  scale_shape_manual(
+    values = c(16, 8),
+    name="Antibiotic\nTreated",
+    breaks=c("N", "Y"),
+    labels=c("No", "Yes")) +
+  scale_color_gradient2(midpoint=mid, low="blue", mid="grey", high="red", space ="Lab" )+
+  theme_light() +
+  geom_abline (intercept = 0, slope = 1, linetype = 2, color = "blue") +
+  labs(x = "# Mice where OTU Abundance Increases", y = "# Mice where OTU Abundance Decreases") +
+  theme(
+    axis.text=element_text(size=12),
+    axis.title=element_text(size=14),
+    legend.position = c(1, .75),
+    legend.justification = c("right", "top"),
+    legend.box.just = "center",
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.box.background = element_rect(),
+    legend.box.margin = margin(3, 3, 3, 3)) +
+  expand_limits(x = c(0,7.5), y = c(0,7.5))
+
+
+```
+
+``` {r Winners/Losers Trait Analysis}
+
+rp_abun_tax_trait_raw_box <- abun_tax_trait %>%
+  gather("Trait", "Value", 14:25) %>%
+  group_by(Abx, Mouse, Trait, Value, otu) %>%
+  filter(Hour <= 120 & sum(abun > 0) > 5) %>%
+  do(mod = summary(lm(abun ~ Hour, .))) %>%
+  mutate(
+    pval = mod$coefficients[[8]],
+    tval = mod$coefficients[[6]]) %>%
+  filter(pval <= 0.1) %>%
+  ungroup()
+
+rp_abun_tax_trait_box <- rp_abun_tax_trait_raw_box %>%
+  group_by(Abx, Trait, Value, otu) %>%
+  summarise(
+    pos_tval = sum(tval > 0), 
+    neg_tval = sum(tval < 0)) %>%
+  filter(pos_tval + neg_tval > 1, Abx == "Y") %>%
+mutate(Status = if_else(neg_tval == 0, "Winner", if_else(pos_tval == 0, "Loser", "Host Dependant")))
+
+p <- ggplot(rp_abun_tax_trait_box, aes(x = Status, y = Value, group = Status, color = Status)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.25, height = .75) +
+  scale_x_discrete(limits = c("Loser","Host Dependant","Winner")) +
+  theme_light() +
+  labs(x = "Status Classification", y = "Trait Strength") +
+  scale_color_manual(
+    values = c("#660066", "#FF0033", "#6699FF"), 
+    breaks=c("Loser","Host Dependant","Winner")) +
+  theme(
+    axis.title.x=element_blank(),
+    axis.text.x=element_blank(),
+    axis.ticks.x=element_blank(),
+    axis.text=element_text(size=12),
+    axis.title=element_text(size=14),
+    legend.justification = c("right", "top"),
+    legend.box.just = "center",
+    legend.title = element_text(face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.box.background = element_rect(),
+    legend.box.margin = margin(3, 3, 3, 3),
+    strip.background = element_rect(colour = "Grey", fill = "white"),
+    strip.text = element_text(size = 12, color = "black")) +
+  facet_wrap(~Trait, labeller = labeller(Trait = trait_names), scales = "free")
 
 ```
