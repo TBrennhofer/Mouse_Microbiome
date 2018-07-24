@@ -558,7 +558,12 @@ entero_data <- abun_tax_trait %>%
   mutate(Entero_Sort = if_else(Family == "Enterobacteriaceae", "Y", "N")) %>%
   filter(Hour %in% c(0,120) & Entero_Sort == "Y" & abun > 0) %>%
   group_by(Mouse, otu, Hour) %>%
-  ifelse(Hour > 100, mutate(Entero_0_Sum = 0, Entero_120_Sum = sum(abun)), mutate(Entero_0_Sum = sum(abun), Entero_120_Sum = 0))
+ 
+   ifelse(Hour > 100, mutate(Entero_0_Sum = 0, Entero_120_Sum = sum(abun)), mutate(Entero_0_Sum = sum(abun), Entero_120_Sum = 0))
+
+mutate(Entero_Sum=NA,
+     Entero_Sum=ifelse(Hour =="0",sum(entero_data$abun),Entero_Sum),
+     Entero_Sum=ifelse(Hour =="120",sum(entero_data$abun),Entero_Sum))
 
   
 summarise(Entero_Sum = sum(abun))
@@ -568,9 +573,6 @@ ggplot(entero_data, aes(x = Entero_Sum, y = Entero_Sum, color = Hour)) +
   geom_point()
 )
   
-mutate(Entero_Sum=NA,
-     Entero_Sum=ifelse(Hour =="0",sum(entero_data$abun),Entero_Sum),
-     Entero_Sum=ifelse(Hour =="120",sum(entero_data$abun),Entero_Sum))
 
 mutate(Entero_Sum_0 = sum(entero_data$abun))
 
