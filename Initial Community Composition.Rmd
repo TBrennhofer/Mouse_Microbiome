@@ -204,7 +204,7 @@ j <- tax %>%
 j <- j %>% 
   mutate(tax_level = factor(tax_level, levels =  c('Phylum','Class','Order','Family','Genus','Species','OTU'))) %>%
   group_by(tax_level) %>% 
-  mutate(total_rich = n_distinct(name)) %>% 
+  mutate(total_rich = n_distinct(name)) %>%
   group_by(tax_level, Mouse, Hour, Abx) %>% 
   summarise(rich = n_distinct(name), total_rich = unique(total_rich), H = (-((rich/total_rich)*log(rich / total_rich))))
 
@@ -372,8 +372,8 @@ tmb <- ggplot(rp_abun_tax_trait, aes(x = pos_tval, y = neg_tval, color = Abx, sh
     legend.box.margin = margin(3, 3, 3, 3)) +
   expand_limits(x = c(0,7.5), y = c(0,7.5))
   
-rp_abun_tax_trait_filt <- rp_abun_tax_trait_raw %>%
-  filter(pos_tval == 2 & neg_tval == 1)
+rp_abun_tax_trait_filt <- rp_abun_tax_trait %>%
+  filter(pos_tval >= 1 & neg_tval >= 1)
 #IDing individual otus and models of interest
 #Cluster 1 on Y-Axis
 #filter(pos_tval == 0 & Abx == "N")
@@ -554,26 +554,112 @@ TukeyHSD(aov.test, oredered = TRUE)
 
 ``` {r Enterobacteriaceae Work}
 
-entero_data <- abun_tax_trait %>%
+entero_data <- abun_tax %>%
   mutate(Entero_Sort = if_else(Family == "Enterobacteriaceae", "Y", "N")) %>%
-  filter(Hour %in% c(0,120) & Entero_Sort == "Y" & abun > 0) %>%
-  group_by(Mouse, otu, Hour) %>%
+  filter(Hour %in% c(0,120) & Entero_Sort == "Y" & abun > 0)%>%
+  select(Hour, Mouse, otu, abun) %>%
+  group_by(Mouse, otu) %>%
+  mutate(duplicate = n()) %>% # count number in each group
+  filter(duplicate != 1) %>%  # select only unique records
+  select(-duplicate) %>%# remove group count column
+  group_by(Mouse, Hour) %>%
+  summarise(Entero_Abun = sum(abun)) %>%
+  spread(Hour, Entero_Abun) %>%
+  rename(Hour120 = "120", Hour0 = "0")
+
+entero_data <- abun_tax %>%
+  filter(Family == 'Enterobacteriaceae' & Hour %in% c(0,120)) %>%
+  group_by(Mouse, Hour) %>%
+  summarise(abun = sum(abun)) %>%
+  spread(Hour, abun, fill = 0)
+  
+entero_data_rich <- abun_tax %>%
+  filter(Family == 'Enterobacteriaceae' & Hour %in% c(0,120) & abun > 0) %>%
+  group_by(Mouse, Abx, Hour) %>%
+  summarise(rich = n_distinct(otu)) %>%
+  spread(Hour, rich) %>%
+  rename(Entero_Rich_Hour_120 = "120", Entero_Rich_Hour_0 = "0")
+
+entero_data_diversity <- abun_tax %>%
+  filter(Hour %in% c(0,120) & abun > 0 & Family == "Enterobacteriaceae") %>%
+  group_by(Mouse) %>%
+  mutate(total_rich = n_distinct(otu)) %>%
+  group_by(Mouse, Hour) %>%
+  summarise(rich = n_distinct(otu), total_rich = unique(total_rich), H = (-((rich/total_rich)*log(rich / total_rich)))) %>%
+  spread(Hour, H) %>%
+  rename(Entero_Diversity_Hour_120 = "120", Entero_Diversity_Hour_0 = "0")
+
+p <- abun_tax %>%
+  filter(Family == 'Enterobacteriaceae' & abun > 0) %>%
+  group_by(Mouse, Abx, Hour) %>%
+  summarise(rich = n_distinct(otu)) %>%
+  ggplot(aes(x = factor(Hour), y = rich, fill = Abx)) +
+    geom_bar(stat = 'identity') +
+    facet_wrap(~Mouse)
+
+#Diversity
+
+community_data <- abun_tax %>%
+  mutate(Entero_Sort = if_else(Family == "Enterobacteriaceae", "Y", "N")) %>%
+  filter(Hour %in% c(0,120) & abun > 0) %>%
+  group_by(Mouse) %>%
+  mutate(total_rich = n_distinct(otu)) %>%
+  group_by(Mouse, Hour) %>%
+  summarise(rich = n_distinct(otu), total_rich = unique(total_rich), H = (-((rich/total_rich)*log(rich / total_rich)))) %>%
+  group_by(Mouse) %>%
+  summarise(delta_rich = diff(rich), delta_H = diff(H))
+
+all_data <- full_join(community_data, entero_data_rich, by = "Mouse")
+all_data <- full_join(all_data, entero_data_diversity, by = "Mouse")
+  #select(-"rich", -"total_rich")
  
-   ifelse(Hour > 100, mutate(Entero_0_Sum = 0, Entero_120_Sum = sum(abun)), mutate(Entero_0_Sum = sum(abun), Entero_120_Sum = 0))
+ggplot(all_data, aes(x = Entero_Diversity_Hour_0, y = -(delta_H), color = Abx)) +
+  geom_point()+
+  stat_smooth(method = "lm")
 
-mutate(Entero_Sum=NA,
-     Entero_Sum=ifelse(Hour =="0",sum(entero_data$abun),Entero_Sum),
-     Entero_Sum=ifelse(Hour =="120",sum(entero_data$abun),Entero_Sum))
+ggplot(all_data, aes(x = Entero_Diversity_Hour_120, y = -(delta_H), color = Abx)) +
+  geom_point()+
+  stat_smooth(method = "lm")
 
-  
-summarise(Entero_Sum = sum(abun))
-  is.numeric(Hour)
+ggplot(all_data, aes(x = Entero_Rich_Hour_0, y = -(delta_H), color = Abx)) +
+  geom_point()+
+  stat_smooth(method = "lm")
 
-ggplot(entero_data, aes(x = Entero_Sum, y = Entero_Sum, color = Hour)) +
+ggplot(all_data, aes(x = Entero_Rich_Hour_0, y = delta_rich, color = Abx)) +
+  geom_point()+
+  stat_smooth(method = "lm")
+
+```
+   
+
+``` {r t-value/Entero. Analysis}
+
+tval_iso <- abun_tax_trait %>%
+  mutate(Entero_Sort = if_else(Family == "Enterobacteriaceae", "Y", "N")) %>%
+  group_by(Abx, Mouse, Entero_Sort, otu) %>%
+  filter(Hour <= 120 & sum(abun > 0) > 5) %>%
+  do(mod = summary(lm(abun ~ Hour, .))) %>%
+  mutate(
+    pval = mod$coefficients[[8]],
+    tval = mod$coefficients[[6]]) %>%
+  filter(pval <= 0.1) %>%
+  ungroup()
+
+tval_iso_clean <- tval_iso %>%
+  group_by(Abx, otu) %>%
+  mutate(
+    pos_tval = sum(tval > 0), 
+    neg_tval = sum(tval < 0)) %>%
+  filter(pos_tval + neg_tval > 1 & pos_tval >=1 & neg_tval >=1 & Abx == "Y") %>%
+  ungroup() %>%
+  select(Mouse, otu, tval)
+
+all_data <- full_join(all_data, tval_iso_clean, by = "Mouse")
+all_data[, 1:10][all_data[, 1:10] == 0] <- NA
+
+
+mod <- summary(lm(tval ~ Entero_Rich_Hour_0, all_data))
+ggplot(all_data, aes(x = Entero_Rich_Hour_0, y = tval, color = Mouse)) +
   geom_point()
-)
-  
-
-mutate(Entero_Sum_0 = sum(entero_data$abun))
 
 ```
